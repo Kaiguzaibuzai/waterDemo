@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>t3d - orbit controller</title>
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+    <link type="text/css" rel="stylesheet" href="main.css" />
+</head>
+
+<body>
+    <div id="info">
+        "WebGL Water" from <a href="http://madebyevan.com/webgl-water">Evan Wallace's webgl-water demo</a> </br>
+        "T3D" from <a href="https://github.com/uinosoft/t3d.js"> T3D WebGL Engine</a> </br>
+        "Model Pool" modified by <a href="https://sketchfab.com/ATD-London" target="_blank" rel="noopener">ATD-London</a>, <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC Attribution</a></br>
+    </div>
+
+    <!-- Import maps polyfill -->
+    <!-- Remove this when import maps will be widely supported -->
+    <script async src="./libs/es-module-shims.js"></script>
+
+    <script type="importmap">
+			{
+				"imports": {
+					"t3d": "./libs/t3d.module.js"
+				}
+			}
+		</script>
+
+    <script type="module">
+        import * as t3d from "t3d";
+        import { Raycaster } from "./libs/Raycaster.js";
+        import { SkyBox } from "./libs/SkyBox.js";
+        import { OrbitControls } from "./libs/OrbitControls.js";
+        import { WaterSimulation } from "./libs/WaterSimulation.js";
+        import { TextureCubeLoader } from "./libs/TextureCubeLoader.js";
+        import { Texture2DLoader } from "./libs/Texture2DLoader.js";
+        import { GLTFLoader } from "./libs/glTF/GLTFLoader.js";
+        import { Water } from "./libs/Water.js";
+        import { GUI } from "./libs/lil-gui.esm.min.js";
+
+        let width = window.innerWidth || 2;
+        let height = window.innerHeight || 2;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        document.body.appendChild(canvas);
+
+        const contextParams = { antialias: true, alpha: false };
+        const gl = canvas.getContext("webgl2", contextParams); // this demo not support webgl2 yet (shadow)
+
+        const renderer = new t3d.WebGLRenderer(gl);
+
+        const shadowMapPass = new t3d.ShadowMapPass();
+
+        const backRenderTarget = new t3d.RenderTargetBack(canvas);
+
+        const scene = new t3d.Scene();
+
+        const cube_texture = new TextureCubeLoader().load([
+            "resources/images/skybox/Bridge2/posx.jpg",
+            "resources/images/skybox/Bridge2/negx.jpg",
+            "resources/images/skybox/Bridge2/posy.jpg",
+            "resources/images/skybox/Bridge2/negy.jpg",
+            "resources/images/skybox/Bridge2/posz.jpg",
+            "resources/images/skybox/Bridge2/negz.jpg",
+        ]);
+
+        const sky_box = new SkyBox(cube_texture);
+        sky_box.gamma = true;
+
+        scene.environment = cube_texture;
+
+        scene.add(sky_box);
+
+        const file = "resources/models/pool.glb";
+
+        const file2 = "resources/models/Duck/glTF/Duck.gltf";
+
+        const loader = new GLTFLoader();
+
+        function loadModel(url, position, scale) {
+            loader
+                .load(url)
+                .then(function (result) {
+                    const object = result.root;
+                    object.traverse((node) => {
+                        node.castShadow = true;
+                        node.receiveShadow = true;
+                    });
+
+                    object.position.set(position[0], position[1], position[2]);
+                    object.scale.set(scale[0], scale[1], scale[2]);
+
+                    scene.add(object);
+                })
+                .catch((e) => console.error(e));
+        }
+
+        loadModel(file, [0, -0, -0.22], [0.14, 0.1, 0.056]);
+        loadModel(file2, [0, 0.06, 0], [0.15, 0.15, 0.15]);
+
+        const gridTex = new Texture2DLoader().load("./resources/images/tiles.jpg");
+        gridTex.wrapS = gridTex.wrapT = t3d.TEXTURE_WRAP.REPEAT;
+
+        const plane_geometry = new t3d.PlaneGeometry(2, 2);
+        const plane_material = new t3d.PBRMaterial();
+        plane_material.roughness = 0.5;
+        plane_material.metalness = 0;
+        plane_material.diffuseMap = gridTex;
+
+        const plane = new t3d.Mesh(plane_geometry, plane_material);
+
+        plane.receiveShadow = true;
+        plane.position.set(0, 0.07, 0);
+
+        scene.add(plane);
+
+        // water
+        const water = new Water();
+
+        water.position.set(0, 0.4, 0);
+
+        scene.add(water);
+
+        const ambientLight = new t3d.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+
+        const directionalLight = new t3d.DirectionalLight(0xffffff, 0.6);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.windowSize = 15;
+        directionalLight.shadow.mapSize.set(2048, 2048);
+
+        directionalLight.position.x = -Math.sin((60 / 180) * Math.PI) * 5;
+        directionalLight.position.y = 5;
+        directionalLight.position.z = -Math.cos((60 / 180) * Math.PI) * 5;
+
+        directionalLight.lookAt(
+            new t3d.Vector3(0, 0, 0),
+            new t3d.Vector3(0, 1, 0)
+        );
+
+        scene.add(directionalLight);
+
+        // add light for the specular of the top view
+        const directionalLight2 = new t3d.DirectionalLight(0xffffff, 0.2);
+        directionalLight2.position.set(0, 100, 0);
+        directionalLight2.lookAt(
+            new t3d.Vector3(0, 0, 0),
+            new t3d.Vector3(0, 1, 0)
+        );
+        scene.add(directionalLight2);
+
+        const camera = new t3d.Camera();
+
+        window.camera = camera;
+
+        camera.outputEncoding = t3d.TEXEL_ENCODING_TYPE.GAMMA;
+        camera.gammaFactor = 1.5;
+
+        camera.position.set(1.6, 2.0, -3.05);
+        camera.lookAt(new t3d.Vector3(0, 0, 0), new t3d.Vector3(0, 1, 0));
+        camera.setPerspective((45 / 180) * Math.PI, width / height, 0.1, 1000);
+        scene.add(camera);
+
+        const controller = new OrbitControls(camera, canvas);
+
+        // water simulation
+        const waterSimulation = new WaterSimulation();
+
+        // interaction
+        const raycaster = new Raycaster();
+
+        const mouse = new t3d.Vector2();
+
+        document.addEventListener("mousemove", function (e) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const array = raycaster.intersectObject(water, true);
+
+            for (let i = 0, l = array.length; i < l; i++) {
+                const intersect = array[i];
+                waterSimulation.addDrop(
+                    renderer,
+                    intersect.point.x,
+                    intersect.point.z,
+                    0.02,
+                    0.01
+                );
+            }
+        });
+
+        const gui = new GUI();
+
+        const waterMaterial = water.material;
+
+        const waterFolder = gui.addFolder("water");
+        waterFolder.addColor(waterMaterial, "diffuse");
+        waterFolder
+            .add(waterMaterial, "clearcoat", 0, 1, 0.001)
+            .onChange(() => (waterMaterial.needsUpdate = true));
+        waterFolder.add(waterMaterial, "clearcoatRoughness", 0, 1, 0.001);
+        waterFolder.add(waterMaterial, "metalness", 0, 1, 0.001);
+        waterFolder.add(waterMaterial, "roughness", 0, 1, 0.001);
+        waterFolder.add(waterMaterial, "opacity", 0, 1, 0.001);
+
+        function loop(count) {
+            requestAnimationFrame(loop);
+
+            controller.update();
+
+            scene.updateMatrix();
+
+            const renderStates = scene.updateRenderStates(camera);
+
+            const renderQueue = scene.updateRenderQueue(camera);
+            const renderQueueLayer = renderQueue.layerList[0];
+
+            shadowMapPass.render(renderer, scene);
+
+            waterSimulation.stepSimulation(renderer);
+            waterSimulation.updateNormals(renderer);
+
+            const waterTexture = waterSimulation._currentRTT.texture;
+
+            water.material.uniforms["water"] = waterTexture;
+
+            renderer.setRenderTarget(backRenderTarget);
+            renderer.setClearColor(0, 0, 0, 1);
+            renderer.clear(true, true, true);
+
+            renderer.beginRender();
+
+            renderer.renderRenderableList(
+                renderQueueLayer.opaque,
+                renderStates,
+                {}
+            );
+            renderer.renderRenderableList(
+                renderQueueLayer.transparent,
+                renderStates,
+                {}
+            );
+
+            renderer.endRender();
+        }
+
+        requestAnimationFrame(loop);
+
+        function onWindowResize() {
+            width = window.innerWidth || 2;
+            height = window.innerHeight || 2;
+
+            camera.setPerspective((45 / 180) * Math.PI, width / height, 0.1, 1000);
+
+            backRenderTarget.resize(width, height);
+        }
+
+        window.addEventListener("resize", onWindowResize, false);
+    </script>
+</body>
+
+</html>
