@@ -3,6 +3,8 @@ import { RenderTarget2D, ShaderPostPass } from 't3d';
 const width = 256;
 const height = 256;
 
+// https://github.com/martinRenou/threejs-water
+
 class WaterSimulation {
 
 	constructor() {
